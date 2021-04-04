@@ -72,9 +72,16 @@ func NewCache(options ...OptionF) (Cache, error) {
 }
 
 // purgePeriodically 自动清理
-// TODO
 func (s *cacheImpl) purgePeriodically() {
+	heartbeat := time.NewTicker(s.opt.CleanIntervalTime)
+	defer heartbeat.Stop()
 
+	s.Lock()
+	defer s.Unlock()
+
+	for range heartbeat.C {
+		s.DeleteExpired()
+	}
 }
 
 // Set 放入key,value并设置过期时间，如果ttl为0，则采用cacheImpl定义的默认ttl
@@ -207,7 +214,7 @@ func (s *cacheImpl) Purge() {
 	s.cache = newLRU(s.maxKeys)
 }
 
-// TODO
+// Stat 返回状态
 func (s *cacheImpl) Stat() Stats {
 	return s.stat
 }
