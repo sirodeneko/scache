@@ -96,7 +96,7 @@ func (s *cacheImpl) Set(key string, value interface{}, ttl time.Duration) {
 	s.stat.Added++
 }
 
-// Get 返回一个key的值，如果这个可以没有过期
+// Get 返回一个key的值，如果这个key没有过期
 func (s *cacheImpl) Get(key string) (interface{}, bool) {
 	s.Lock()
 	defer s.Unlock()
