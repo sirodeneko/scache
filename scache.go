@@ -1,6 +1,7 @@
 package scache
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 type Cache interface {
 	Set(key string, value interface{}, ttl time.Duration)
 	Get(key string) (interface{}, bool)
+	GetWithF(ctx context.Context, key string, ttl time.Duration, f GetF) (interface{}, error)
 	Peek(key string) (interface{}, bool)
 	Keys() []string
 	Len() int
@@ -31,11 +33,9 @@ type Stats struct {
 
 // cacheImpl  Cache 接口的实现
 type cacheImpl struct {
-	ttl       time.Duration
-	maxKeys   int
-	onEvicted func(key string, value interface{})
-	cache     *lru
-	opt       *option
+	maxKeys int
+	cache   *lru //并发不安全，需上锁
+	opt     *option
 
 	sync.Mutex
 	stat Stats
@@ -48,20 +48,21 @@ const noEvictionTTL = time.Hour * 24 * 365 * 10
 // 默认的MaxKeys为0，不限制缓存的数量
 // 默认的过期时间为10年
 // 默认不自动扫描过期的key
-func NewCache(maxKeys int, options ...OptionF) (Cache, error) {
-	if maxKeys < 0 {
-		return nil, errors.New("the maxKeys is too low")
-	}
-	o := &option{}
+func NewCache(options ...OptionF) (Cache, error) {
+	o := &option{TTL: noEvictionTTL}
 	for _, f := range options {
 		f(o)
+	}
+	if o.MaxKeys < 0 {
+		return nil, errors.New("the maxKeys is too low")
 	}
 
 	s := &cacheImpl{
 		opt:   o,
-		cache: newLRU(maxKeys),
-		ttl:   noEvictionTTL,
+		cache: newLRU(o.MaxKeys),
 	}
+	// 绑定cacheImpl
+	s.cache.cacheImpl = s
 
 	if o.AutoClean {
 		go s.purgePeriodically()
@@ -76,57 +77,137 @@ func (s *cacheImpl) purgePeriodically() {
 
 }
 
-// TODO
+// Set 放入key,value并设置过期时间，如果ttl为0，则采用cacheImpl定义的默认ttl
 func (s *cacheImpl) Set(key string, value interface{}, ttl time.Duration) {
-	panic("implement me")
+	s.Lock()
+	defer s.Unlock()
+
+	if ttl == 0 {
+		ttl = s.opt.TTL
+	}
+	s.cache.add(key, value, ttl)
+	s.stat.Added++
 }
 
-// TODO
+// Get 返回一个key的值，如果这个可以没有过期
 func (s *cacheImpl) Get(key string) (interface{}, bool) {
-	panic("implement me")
+	s.Lock()
+	defer s.Unlock()
+
+	reply, ok := s.cache.get(key)
+	if ok {
+		s.stat.Hits++
+	} else {
+		s.stat.Misses++
+	}
+
+	return reply, ok
 }
 
-// TODO
+// Get 返回一个key的值，如果这个可以没有不存在或者过期了，将调用函数去获取
+func (s *cacheImpl) GetWithF(ctx context.Context, key string, ttl time.Duration, f GetF) (interface{}, error) {
+	s.Lock()
+	defer s.Unlock()
+
+	reply, ok := s.cache.get(key)
+	if !ok {
+		reply, err := f(ctx)
+		if err != nil {
+			s.stat.Misses++
+			return nil, err
+		}
+		s.stat.Added++
+		s.stat.Misses++
+		s.cache.add(key, reply, ttl)
+		return reply, nil
+	}
+	if ok {
+		s.stat.Hits++
+	} else {
+		s.stat.Misses++
+	}
+	return reply, nil
+}
+
+// Peek 返回一个key的值， 但是并不更新其“最近使用”的状态
 func (s *cacheImpl) Peek(key string) (interface{}, bool) {
-	panic("implement me")
+	s.Lock()
+	defer s.Unlock()
+
+	reply, ok := s.cache.peek(key)
+	if ok {
+		s.stat.Hits++
+	} else {
+		s.stat.Misses++
+	}
+
+	return reply, ok
 }
 
-// TODO
+// Keys 返回所有的key，如果发现key过期了，会进行删除，故这也是一次扫描操作过期key的操作
 func (s *cacheImpl) Keys() []string {
-	panic("implement me")
+	s.Lock()
+	defer s.Unlock()
+	return s.cache.keys()
 }
 
-// TODO
+// Len 返回key的数量，包括过期了的
 func (s *cacheImpl) Len() int {
-	panic("implement me")
+	return s.cache.len()
 }
 
-// TODO
+// Invalidate 使一个key无效，即删除它
 func (s *cacheImpl) Invalidate(key string) {
-	panic("implement me")
+	s.Lock()
+	defer s.Unlock()
+	s.cache.del(key)
 }
 
-// TODO
+// InvalidateFn 扫描所有的key,如果函数返回值为true,删除这个key
 func (s *cacheImpl) InvalidateFn(fn func(key string) bool) {
-	panic("implement me")
+	s.Lock()
+	defer s.Unlock()
+	for key := range s.cache.mp {
+		if fn(key) {
+			s.cache.del(key)
+		}
+	}
 }
 
-// TODO
+// RemoveOldest 删除最老的key
 func (s *cacheImpl) RemoveOldest() {
-	panic("implement me")
+	s.Lock()
+	defer s.Unlock()
+	s.cache.tailDel()
 }
 
-// TODO
+// DeleteExpired 删除过期的key
 func (s *cacheImpl) DeleteExpired() {
-	panic("implement me")
+	s.Lock()
+	defer s.Unlock()
+	for key, value := range s.cache.mp {
+		if time.Now().After(value.expiresAt) {
+			s.cache.del(key)
+		}
+	}
 }
 
-// TODO
+// Purge 清除所有的key
 func (s *cacheImpl) Purge() {
-	panic("implement me")
+	s.Lock()
+	defer s.Unlock()
+
+	for k, v := range s.cache.mp {
+		delete(s.cache.mp, k)
+		s.stat.Evicted++
+		if s.opt.onEvicted != nil {
+			s.opt.onEvicted(k, v.value)
+		}
+	}
+	s.cache = newLRU(s.maxKeys)
 }
 
 // TODO
 func (s *cacheImpl) Stat() Stats {
-	panic("implement me")
+	return s.stat
 }
