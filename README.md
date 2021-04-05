@@ -1,4 +1,4 @@
-<h1 align='center'>xcache</h1>
+<h1 align='center'>scache</h1>
 <div align=center><img src="https://github.com/sirodeneko/scache/blob/master/rideGo.jpg"/></div>
 <h2 align='center'>A Cache For Go</h2>
 
