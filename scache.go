@@ -76,9 +76,6 @@ func (s *cacheImpl) purgePeriodically() {
 	heartbeat := time.NewTicker(s.opt.CleanIntervalTime)
 	defer heartbeat.Stop()
 
-	s.Lock()
-	defer s.Unlock()
-
 	for range heartbeat.C {
 		s.DeleteExpired()
 	}

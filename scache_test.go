@@ -182,6 +182,20 @@ func TestCacheRemoveOldest(t *testing.T) {
 	assert.Equal(t, []string{"key2"}, lc.Keys())
 	assert.Equal(t, 1, lc.Len())
 }
+func TestCacheBug(t *testing.T) {
+	rankCache, _ := NewCache(AutoClean(4*time.Second), MaxKeys(500))
+
+	rankCache.Set("a", 1, 10*time.Second)
+	for i := 0; i < 5; i++ {
+		time.Sleep(3 * time.Second)
+		val, ok := rankCache.Get("a")
+		if ok {
+			fmt.Println("OK：", val)
+		} else {
+			fmt.Println("no ok!")
+		}
+	}
+}
 
 func ExampleCache() {
 	// make cache with short TTL and 3 max keys
