@@ -1,7 +1,9 @@
 package scache
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -195,6 +197,27 @@ func TestCacheBug(t *testing.T) {
 			fmt.Println("no ok!")
 		}
 	}
+}
+
+func BenchmarkGet(b *testing.B) {
+	b.StopTimer()
+	rankCache, _ := NewCache(TTL(time.Millisecond * 10))
+	b.StartTimer()
+
+	b.N = 20000000
+
+	for i := 0; i < b.N; i++ {
+		k := strconv.Itoa(i % 10)
+		v, _ := rankCache.GetWithF(nil, k, time.Millisecond*10, func(ctx context.Context) (interface{}, error) {
+			// db查询
+			time.Sleep(100 * time.Microsecond)
+			return "val" + k, nil
+		})
+		if v.(string) != "val"+k {
+			b.Errorf("结果错误")
+		}
+	}
+
 }
 
 func ExampleCache() {

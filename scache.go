@@ -37,7 +37,7 @@ type cacheImpl struct {
 	cache   *lru //并发不安全，需上锁
 	opt     *option
 
-	sync.Mutex
+	sync.RWMutex
 	stat Stats
 }
 
@@ -95,8 +95,8 @@ func (s *cacheImpl) Set(key string, value interface{}, ttl time.Duration) {
 
 // Get 返回一个key的值，如果这个key没有过期
 func (s *cacheImpl) Get(key string) (interface{}, bool) {
-	s.Lock()
-	defer s.Unlock()
+	s.RLock()
+	defer s.RUnlock()
 
 	reply, ok := s.cache.get(key)
 	if ok {
@@ -108,12 +108,12 @@ func (s *cacheImpl) Get(key string) (interface{}, bool) {
 	return reply, ok
 }
 
-// Get 返回一个key的值，如果这个可以没有不存在或者过期了，将调用函数去获取
+// GetWithF 返回一个key的值，如果这个可以没有不存在或者过期了，将调用函数去获取
 func (s *cacheImpl) GetWithF(ctx context.Context, key string, ttl time.Duration, f GetF) (interface{}, error) {
-	s.Lock()
-	defer s.Unlock()
-
+	s.RLock()
 	reply, ok := s.cache.get(key)
+	s.RUnlock()
+
 	if !ok {
 		reply, err := f(ctx)
 		if err != nil {
@@ -122,7 +122,9 @@ func (s *cacheImpl) GetWithF(ctx context.Context, key string, ttl time.Duration,
 		}
 		s.stat.Added++
 		s.stat.Misses++
+		s.Lock()
 		s.cache.add(key, reply, ttl)
+		s.Unlock()
 		return reply, nil
 	}
 	if ok {
@@ -135,8 +137,8 @@ func (s *cacheImpl) GetWithF(ctx context.Context, key string, ttl time.Duration,
 
 // Peek 返回一个key的值， 但是并不更新其“最近使用”的状态
 func (s *cacheImpl) Peek(key string) (interface{}, bool) {
-	s.Lock()
-	defer s.Unlock()
+	s.RLock()
+	defer s.RUnlock()
 
 	reply, ok := s.cache.peek(key)
 	if ok {
