@@ -95,8 +95,8 @@ func (s *cacheImpl) Set(key string, value interface{}, ttl time.Duration) {
 
 // Get 返回一个key的值，如果这个key没有过期
 func (s *cacheImpl) Get(key string) (interface{}, bool) {
-	s.RLock()
-	defer s.RUnlock()
+	s.Lock()
+	defer s.Unlock()
 
 	reply, ok := s.cache.get(key)
 	if ok {
@@ -110,9 +110,9 @@ func (s *cacheImpl) Get(key string) (interface{}, bool) {
 
 // GetWithF 返回一个key的值，如果这个可以没有不存在或者过期了，将调用函数去获取
 func (s *cacheImpl) GetWithF(ctx context.Context, key string, ttl time.Duration, f GetF) (interface{}, error) {
-	s.RLock()
+	s.Lock()
 	reply, ok := s.cache.get(key)
-	s.RUnlock()
+	s.Unlock()
 
 	if !ok {
 		reply, err := f(ctx)
@@ -137,8 +137,8 @@ func (s *cacheImpl) GetWithF(ctx context.Context, key string, ttl time.Duration,
 
 // Peek 返回一个key的值， 但是并不更新其“最近使用”的状态
 func (s *cacheImpl) Peek(key string) (interface{}, bool) {
-	s.RLock()
-	defer s.RUnlock()
+	s.Lock()
+	defer s.Unlock()
 
 	reply, ok := s.cache.peek(key)
 	if ok {

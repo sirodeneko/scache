@@ -220,6 +220,41 @@ func BenchmarkGet(b *testing.B) {
 
 }
 
+func TestConcurrentMapWrites(t *testing.T) {
+	lc, err := NewCache()
+	assert.NoError(t, err)
+
+	wg := sync.WaitGroup{}
+	go func() {
+		wg.Add(1)
+		for i := 0; i < 100000; i++ {
+			k := strconv.Itoa(i % 10)
+			lc.Set(k, i, 0)
+		}
+		wg.Done()
+	}()
+
+	go func() {
+		wg.Add(1)
+		for i := 0; i < 100000; i++ {
+			k := strconv.Itoa(i % 10)
+			lc.Get(k)
+		}
+		wg.Done()
+	}()
+
+	go func() {
+		wg.Add(1)
+		for i := 0; i < 100000; i++ {
+			k := strconv.Itoa(i % 10)
+			lc.Get(k)
+		}
+		wg.Done()
+	}()
+
+	wg.Wait()
+}
+
 func ExampleCache() {
 	// make cache with short TTL and 3 max keys
 	cache, _ := NewCache(MaxKeys(3), TTL(time.Millisecond*10))
